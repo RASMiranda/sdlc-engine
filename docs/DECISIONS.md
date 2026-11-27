@@ -2,9 +2,29 @@
 
 Decisions about this repository, newest last. A decision is never edited after it is merged; a later one supersedes it.
 
-## D-001: Engine extraction from career-ai
+## D-001: Engine extraction from career-ai (2026-11-27, Bangkok)
 
-TODO: paste text of the career-ai extraction ADR, to be provided by the maintainer
+Source: career-ai ADR-082, "The SDLC engine moves to a shared public repo, sdlc-engine (S3)". Extracted at career-ai@a2422d8b2512b3065c3f68a7bddc470006a7d22c.
+
+Context. The agentic SDLC (engine, reusable stage workflow, goldens; career-ai ADR-064 to ADR-068 and ADR-073 to ADR-077) lived inside career-ai. A second project, motion-blueprint-app (a public JavaScript PWA with npm tests), will use the same workflow. A third repository that holds personal data stays out on purpose: the agents can read a whole repository they run in (non-negotiables 1 and 2).
+
+Decision.
+
+* (a) A public repository, RASMiranda/sdlc-engine, holds the stdlib-only engine, the reusable workflow `sdlc-stage.yml`, `template/` for new projects and the docs.
+* (b) Each project keeps a thin caller `sdlc.yml`, `.github/sdlc-config.json` (with `config_version`), its agents, labels, `REVIEW.md` and CODEOWNERS.
+* (c) A project pins the engine by the full 40-hex commit SHA of a release, with a `# vX.Y.Z` comment; never `@main`, never a tag.
+* (d) Releases follow SemVer, 0.y.z until 1.0. A breaking change bumps the minor and says BREAKING in `CHANGELOG.md`. Tags `vX.Y.Z` are annotated and protected by a tag ruleset.
+* (e) Licence: MIT, matching motion-blueprint-app.
+* (f) One `CLAUDE_CODE_OAUTH_TOKEN` per project repository. The Pro quota is shared and each budget gate counts only its own repository.
+* (g) A bump is a PR in the project (Dependabot or by hand), a protected-path PR merged by a human, followed by a canary intent run. Rollback is a revert.
+* (h) The engine repository is locked down harder than the projects: rulesets on main and on tags, read-only Actions permissions, no secrets, immutable releases (see D-002).
+* (i) A `check-project` command compares the pin and the `config_version`; the running workflow verifies its own commit.
+
+Consequences.
+
+* An engine fix reaches a project only through a bump PR, so a fix is two merges per project. Every project can lag; `check-project` reports it.
+* A compromised engine repository reaches every consumer's token, which is why (c) and (h) exist.
+* Not verified when decided: whether Dependabot bumps a SHA-pinned reusable-workflow reference, and how a called workflow learns its own commit (a spike measures it before the cross-repo step). Immutable releases were available on this plan (D-002).
 
 ## D-002: Engine repo lock-down (2026-11-27, Bangkok)
 

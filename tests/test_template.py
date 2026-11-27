@@ -129,9 +129,10 @@ def test_docs_config_names_every_repository_variable_the_stage_workflow_reads():
         assert f"`{name}`" in doc, name
 
 
-def test_decisions_holds_d001_as_an_open_todo_d002_verbatim_and_d003():
+def test_decisions_holds_d001_with_its_source_d002_verbatim_and_d003():
     text = (ENGINE / "docs" / "DECISIONS.md").read_text(encoding="utf-8")
-    assert f"## D-001: Engine extraction from {SOURCE_REPO}\n\nTODO: paste text of the {SOURCE_REPO} extraction ADR, to be provided by the maintainer\n" in text
+    assert f"## D-001: Engine extraction from {SOURCE_REPO} (2026-11-27, Bangkok)\n\nSource: {SOURCE_REPO} ADR-082," in text
+    assert "TODO" not in text                                  # D-001 is no longer an open item
     assert "## D-002: Engine repo lock-down (2026-11-27, Bangkok)\n" in text and "## D-003: " in text
     assert "Six settings applied and confirmed on the settings pages:" in text
     assert text.index("## D-001") < text.index("## D-002") < text.index("## D-003")
