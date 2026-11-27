@@ -124,3 +124,10 @@ def test_a_new_tag_goes_on_to_the_tag_and_release_steps(tmp_path):
 def test_a_failed_lookup_fails_the_job_and_never_tags_blind(tmp_path):
     run, out = run_exists(tmp_path, "", fail=True)
     assert run.returncode != 0 and "exists=" not in out
+
+
+def test_one_release_job_at_a_time_and_none_is_cancelled():
+    # D-006: two pushes to main that change the changelog close together queue in one group; a running release is
+    # never cancelled halfway between its tag and its release.
+    assert WF["concurrency"] == {"group": "release", "cancel-in-progress": False}
+    assert "concurrency" not in JOB                         # workflow level: covers every run of this file

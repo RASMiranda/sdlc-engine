@@ -1,7 +1,7 @@
 """``python -m sdlc_engine check-project --root DIR``: does a consumer project fit this engine? (D-004). Stdlib only.
 
 It reads files under ``--root`` and nothing else: no network, no git, no engine input (the stage workflow has none). One
-plain message per failure, each starting with the rule that failed (reserved, config, roles, caller, pin, secrets); exit 1 on any
+plain message per failure, each starting with the rule that failed (reserved, config, roles, caller, triggers, pin, secrets); exit 1 on any
 failure, 0 otherwise.
 
 PyYAML is a test dependency only, so the caller workflow is read by a small reader for the subset of YAML a caller
@@ -261,6 +261,20 @@ def _check_caller_lists(where, text, cfg, out):
             out.append(f"caller: {CALLER} {where} lists the {what} {sorted(got)}, but {CONFIG_FILE} has {sorted(want)}")
 
 
+def _check_triggers(doc, out):
+    """The caller starts only on issue events (D-006). Its job `if` and `decide` are written for those alone; any other
+    event would start a job that holds write permissions and the OAuth secret on input nothing here vets."""
+    on = doc.get("on")
+    if not isinstance(on, dict):
+        out.append(f"triggers: {CALLER} on: is {on!r}; it must be a mapping whose only key is issues")
+        return
+    if "issues" not in on:
+        out.append(f"triggers: {CALLER} on: has no issues key; the caller must be triggered by issues only")
+    for event in on:
+        if event != "issues":
+            out.append(f"triggers: {CALLER} on: has {event!r}; the caller must be triggered by issues only")
+
+
 def _check_caller(root, cfg, out):
     """Returns the caller's stage job (a dict) for the pin and secrets rules, or None."""
     path = root / CALLER
@@ -272,6 +286,7 @@ def _check_caller(root, cfg, out):
     except (OSError, UnicodeDecodeError, YamlError) as exc:
         out.append(f"caller: {CALLER} cannot be read: {exc}")
         return None
+    _check_triggers(doc, out)
     job = _get(doc, "jobs", STAGE_JOB)
     if not isinstance(job, dict):
         out.append(f"caller: {CALLER} has no job named {STAGE_JOB!r}")

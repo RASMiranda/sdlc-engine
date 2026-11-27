@@ -258,6 +258,68 @@ def test_the_event_types_constant_is_exactly_the_actions_decide_starts_a_stage_o
     assert {a for a in every if runs(a)} == ISSUE_EVENT_TYPES
 
 
+# ---------------------------------------------------------------------------------------------------------- triggers
+OTHER_EVENTS = {
+    "workflow_dispatch": "  workflow_dispatch:\n",
+    "pull_request": "  pull_request:\n    types: [opened]\n",
+    "pull_request_target": "  pull_request_target:\n    types: [opened]\n",
+    "pull_request_review": "  pull_request_review:\n",
+    "pull_request_review_comment": "  pull_request_review_comment:\n",
+    "push": "  push:\n    branches: [main]\n",
+    "schedule": "  schedule:\n    - cron: '0 0 * * *'\n",
+    "workflow_run": "  workflow_run:\n    workflows: [tests]\n",
+    "workflow_call": "  workflow_call:\n",
+    "repository_dispatch": "  repository_dispatch:\n",
+    "issue_comment": "  issue_comment:\n    types: [created]\n",
+    "release": "  release:\n    types: [published]\n",
+    "merge_group": "  merge_group:\n",
+    "discussion": "  discussion:\n",
+}
+
+
+def test_issues_alone_passes_the_triggers_rule(ok):
+    assert check_project(ok) == []
+    assert read_yaml((ok / CALLER).read_text())["on"].keys() == {"issues"}
+
+
+@pytest.mark.parametrize("event", sorted(OTHER_EVENTS))
+def test_any_other_event_next_to_issues_is_one_triggers_failure(ok, event):
+    edit(ok, CALLER, "on:\n", "on:\n" + OTHER_EVENTS[event])
+    assert check_project(ok) == [f"triggers: {CALLER} on: has {event!r}; the caller must be triggered by issues only"]
+
+
+@pytest.mark.parametrize("event", sorted(OTHER_EVENTS))
+def test_any_other_event_after_issues_is_caught_too(ok, event):
+    edit(ok, CALLER, "    types: [opened, labeled]\n", "    types: [opened, labeled]\n" + OTHER_EVENTS[event])
+    assert check_project(ok) == [f"triggers: {CALLER} on: has {event!r}; the caller must be triggered by issues only"]
+
+
+def test_two_other_events_are_two_failures(ok):
+    edit(ok, CALLER, "on:\n", "on:\n" + OTHER_EVENTS["push"] + OTHER_EVENTS["workflow_dispatch"])
+    assert [m for m in check_project(ok) if m.startswith("triggers")] == [
+        f"triggers: {CALLER} on: has 'push'; the caller must be triggered by issues only",
+        f"triggers: {CALLER} on: has 'workflow_dispatch'; the caller must be triggered by issues only"]
+
+
+def test_a_caller_without_issues_fails_the_triggers_rule(ok):
+    edit(ok, CALLER, "  issues:\n    types: [opened, labeled]\n", "  workflow_dispatch:\n")
+    problems = check_project(ok)
+    assert f"triggers: {CALLER} on: has no issues key; the caller must be triggered by issues only" in problems
+    assert f"triggers: {CALLER} on: has 'workflow_dispatch'; the caller must be triggered by issues only" in problems
+
+
+@pytest.mark.parametrize("on", ["on: issues\n", "on: [issues, push]\n", "on: [issues]\n"])
+def test_on_that_is_not_a_mapping_fails_the_triggers_rule(ok, on):
+    edit(ok, CALLER, "on:\n  issues:\n    types: [opened, labeled]\n", on)
+    problems = [m for m in check_project(ok) if m.startswith("triggers")]
+    assert len(problems) == 1 and "it must be a mapping whose only key is issues" in problems[0]
+
+
+def test_the_fixture_and_the_template_callers_pass_the_triggers_rule():
+    for root in (FIXTURE, ENGINE / "template"):
+        assert not [m for m in check_project(root) if m.startswith("triggers")], root
+
+
 # --------------------------------------------------------------------------------------------------------------- pin
 @pytest.mark.parametrize("name,uses", [
     ("a tag", f"{ENGINE_REPO}/.github/workflows/sdlc-stage.yml@v1"),
