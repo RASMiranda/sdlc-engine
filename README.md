@@ -23,11 +23,10 @@ calls it. A human merges.
 
 ## Status
 
-This is the first extraction, `0.1.0`. The stage workflow was copied unchanged apart from the committer name. As copied it
-still expects the engine source at `src/sdlc_engine/` and the config at `.github/sdlc-config.json` **in the calling
-repository**, and the caller in `template/` refers to the stage workflow of this repository by a placeholder. Making the
-stage workflow fetch the pinned engine from this repository is the next step and is not done here. Until it is, treat
-`template/` as the target layout, not as something that already runs.
+Version `0.2.0` is the first release a consumer can call: the stage workflow loads the engine from its own repository and
+commit, verifies it, and reads the project config from the caller's trigger commit (D-004). It is BREAKING relative to `0.1.0`:
+the config needs `"config_version": 1`, and the config change and the pin bump go in the same pull request. Read
+`CHANGELOG.md` before you bump. The behaviour in a real cross-repository call is not yet verified; the first canary run covers it.
 
 ## How a project adopts it
 
@@ -46,7 +45,7 @@ stage workflow fetch the pinned engine from this repository is the next step and
 Reference the engine only by a **full 40-hex commit SHA, with the version in a comment**:
 
 ```yaml
-uses: RASMiranda/sdlc-engine/.github/workflows/sdlc-stage.yml@<full-40-hex-commit-sha> # v0.1.0
+uses: RASMiranda/sdlc-engine/.github/workflows/sdlc-stage.yml@<full-40-hex-commit-sha> # v0.2.0
 ```
 
 Never `@main`, never a branch, and never a floating tag such as `@v0`. A branch or a floating tag can change under you
