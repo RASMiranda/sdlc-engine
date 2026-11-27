@@ -96,6 +96,36 @@ def test_one_message_per_failure_each_naming_its_rule(ok):
     assert [m.split(":")[0] for m in check_project(ok)] == ["config", "pin", "secrets", "secrets"]
 
 
+# --------------------------------------------------------------------------------------------------------- reserved
+@pytest.mark.parametrize("name", ["engine", "project-config"])
+@pytest.mark.parametrize("kind", ["folder", "file", "empty folder"])
+def test_a_reserved_name_in_the_project_root_is_one_failure(ok, name, kind):
+    if kind == "file":
+        (ok / name).write_text("x")
+    else:
+        (ok / name).mkdir()
+        if kind == "folder":
+            (ok / name / "f").write_text("x")
+    assert check_project(ok) == [f"reserved: {name}/ exists in the project root; the stage workflow deletes and re-creates it (D-004)"]
+
+
+def test_both_reserved_names_are_two_failures_and_neither_is_none(ok):
+    assert [m for m in check_project(ok) if m.startswith("reserved")] == []
+    (ok / "engine").mkdir()
+    (ok / "project-config").write_text("x")
+    assert [m.split("/")[0] for m in check_project(ok)] == ["reserved: engine", "reserved: project-config"]
+
+
+def test_a_dangling_link_with_a_reserved_name_is_a_failure(ok):
+    (ok / "engine").symlink_to(ok / "nowhere")
+    assert len(check_project(ok)) == 1 and check_project(ok)[0].startswith("reserved: engine/")
+
+
+def test_the_fixture_and_the_template_hold_no_reserved_name():
+    for root in (FIXTURE, ENGINE / "template"):
+        assert not [m for m in check_project(root) if m.startswith("reserved")], root
+
+
 # ------------------------------------------------------------------------------------------------------------ config
 def test_a_missing_config_file_is_one_failure(ok):
     (ok / CONFIG).unlink()

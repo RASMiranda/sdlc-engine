@@ -60,14 +60,17 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
-          # through env, never into the script text.
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
           if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
             exit 1
           fi
-          ENGINE_HEAD=$(git -C engine rev-parse HEAD)
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
           if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
             echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
             exit 1
           fi
           echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
@@ -159,14 +162,17 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
-          # through env, never into the script text.
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
           if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
             exit 1
           fi
-          ENGINE_HEAD=$(git -C engine rev-parse HEAD)
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
           if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
             echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
             exit 1
           fi
           echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
@@ -326,14 +332,17 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
-          # through env, never into the script text.
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
           if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
             exit 1
           fi
-          ENGINE_HEAD=$(git -C engine rev-parse HEAD)
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
           if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
             echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
             exit 1
           fi
           echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
@@ -536,14 +545,17 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
-          # through env, never into the script text.
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
           if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
             exit 1
           fi
-          ENGINE_HEAD=$(git -C engine rev-parse HEAD)
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
           if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
             echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
             exit 1
           fi
           echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"

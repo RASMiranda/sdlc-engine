@@ -114,6 +114,10 @@ Decision.
 
 Consequences.
 
+* The config change (adding `config_version`) and the pin bump must be in the SAME pull request, because an engine without
+  `config_version` support rejects the key as unknown and this engine rejects a file without it.
+* A failed engine verification removes `engine/` so later steps cannot run an unverified checkout.
+* `check-project` fails on a tracked or untracked `engine/` or `project-config/` folder (rule `reserved`).
 * BREAKING: a project's config needs `config_version`, and the workflow cannot be called from a repository whose own `src/` it
   would have used. `engine/` and `project-config/` are reserved folder names in the caller's workspace.
 * `permissions`, triggers, concurrency, tool lists, the model, token handling and the deny rules are unchanged. `id-token: write`

@@ -82,8 +82,9 @@ approve and never block by themselves; branch protection, a green check and a co
   first canary run in a consumer covers the rest (D-004). If they were wrong, the verify step would fail the job rather than
   run other code.
 - The folders `engine/` and `project-config/` are the workflow's own, in the caller's workspace. Each load deletes them
-  before it checks them out, so a consumer must keep those two names free of tracked files. `check-project` does not look
-  for this.
+  before it checks them out, so a consumer must keep those two names free. `check-project` fails (rule `reserved`) when
+  either exists in the project root, tracked or not. A failed engine verification also removes `engine/`, so a later step
+  cannot run an unverified checkout.
 
 ## This repository
 

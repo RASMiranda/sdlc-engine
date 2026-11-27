@@ -99,6 +99,7 @@ def test_the_verify_step_passes_on_the_called_commit_and_writes_the_sha_to_the_s
     shas, _ = make_engine(tmp_path)
     run = run_verify(tmp_path, shas[-1])
     assert run.returncode == 0, run.stderr
+    assert (tmp_path / "engine" / "f").is_file()                       # a verified checkout stays
     assert (tmp_path / "summary.md").read_text() == f"Engine: owner/engine-repo at {shas[-1]} (the called workflow's own repository and commit)\n"
 
 
@@ -110,6 +111,24 @@ def test_the_verify_step_fails_unless_the_checkout_is_exactly_the_called_commit(
     run = run_verify(tmp_path, value)
     assert run.returncode == 1 and "::error title=Engine commit::" in run.stdout, (run.stdout, run.stderr)
     assert not (tmp_path / "summary.md").exists()
+    assert not (tmp_path / "engine").exists()                          # fail closed: no unverified checkout is left to run
+
+
+def test_the_verify_step_removes_the_engine_folder_when_it_cannot_read_the_checkout_at_all(tmp_path):
+    make_engine(tmp_path)
+    shutil.rmtree(tmp_path / "engine" / ".git")                        # a folder that is not a repository
+    run = run_verify(tmp_path, "a" * 40)
+    assert run.returncode != 0 and not (tmp_path / "engine").exists()
+
+
+def test_every_verify_step_removes_engine_before_each_exit_1():
+    verifies = [s for s in STEPS if "verify the engine commit" in s["name"]]
+    assert len(verifies) == 4
+    for s in verifies:
+        lines = [line.strip() for line in s["run"].splitlines()]
+        exits = [i for i, line in enumerate(lines) if line == "exit 1"]
+        assert len(exits) == 2 and all(lines[i - 1] == "rm -rf engine" for i in exits), s["name"]
+        assert "|| { rm -rf engine; exit 1; }" in s["run"]
 
 
 # ------------------------------------------------------------------------------------------ the config checkouts

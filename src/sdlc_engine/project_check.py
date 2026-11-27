@@ -1,7 +1,7 @@
 """``python -m sdlc_engine check-project --root DIR``: does a consumer project fit this engine? (D-004). Stdlib only.
 
 It reads files under ``--root`` and nothing else: no network, no git, no engine input (the stage workflow has none). One
-plain message per failure, each starting with the rule that failed (config, roles, caller, pin, secrets); exit 1 on any
+plain message per failure, each starting with the rule that failed (reserved, config, roles, caller, pin, secrets); exit 1 on any
 failure, 0 otherwise.
 
 PyYAML is a test dependency only, so the caller workflow is read by a small reader for the subset of YAML a caller
@@ -10,6 +10,7 @@ comments). Anything outside that subset is a failure ("cannot read"), never a gu
 keeps the reader equal to PyYAML on the fixture and the template callers.
 """
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -29,6 +30,8 @@ SECRET_VALUE = re.compile(r"\$\{\{\s*secrets\." + SECRET_NAME + r"\s*\}\}")
 CALLER = ".github/workflows/sdlc.yml"
 CONFIG_FILE = ".github/sdlc-config.json"
 STAGE_JOB = "stage"
+# The stage workflow deletes and re-creates these two folders in the caller's workspace (D-004).
+RESERVED = ("engine", "project-config")
 
 
 # ------------------------------------------------------------------------------------------ shared expression helpers
@@ -310,9 +313,16 @@ def _check_secrets(job, out):
             out.append(f"secrets: {CALLER} job {STAGE_JOB!r} does not pass {SECRET_NAME}")
 
 
+def _check_reserved(root, out):
+    for name in RESERVED:
+        if os.path.lexists(root / name):                   # a file, a folder or a dangling link: all are in the way
+            out.append(f"reserved: {name}/ exists in the project root; the stage workflow deletes and re-creates it (D-004)")
+
+
 def check_project(root):
     """Every failure found under ``root``, as plain messages. Empty when the project fits this engine."""
     root, out = Path(root), []
+    _check_reserved(root, out)
     cfg = _read_config(root, out)
     if cfg is not None:
         _check_roles(root, cfg, out)

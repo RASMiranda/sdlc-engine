@@ -148,11 +148,12 @@ PYTHONPATH=/tmp/sdlc-engine/src python -P -m sdlc_engine check-project --root .
 ```
 
 It reads files under `--root` only (standard library, no network, no git) and prints one plain message per failure to
-standard error, each starting with the rule that failed. **Exit 1** on any failure, **0** when there is none (it then prints one
+standard error, each starting with the rule that failed (`reserved`, `config`, `roles`, `caller`, `pin`, `secrets`). **Exit 1** on any failure, **0** when there is none (it then prints one
 `ok:` line). Run it from the project root before a bump pull request is merged.
 
 | Rule | Fails when |
 |---|---|
+| `reserved` | `engine` or `project-config` exists in the project root, as a tracked or untracked file or folder. One message per name. The stage workflow deletes and re-creates both in the caller's workspace. |
 | `config` | `.github/sdlc-config.json` is missing or not JSON, `config_version` is missing or not `1`, a required key is missing or unknown, or a value has the wrong type. The keys and types are the ones the engine itself enforces. |
 | `roles` | A role named in `stages` has no `.claude/agents/<role>.md`. |
 | `caller` | `.github/workflows/sdlc.yml` has no job `stage`, cannot be read, or differs from the config: the two `fromJSON` lists (author associations, then labels) in the job `if` and in the concurrency group must equal `trusted_associations` and the keys of `label_to_stage`, and `on.issues.types` must be exactly `opened` and `labeled`. |

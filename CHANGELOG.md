@@ -7,7 +7,8 @@ Versioning. A released tag is never moved: a fix is a new version.
 
 ### BREAKING
 - `config_version` is required in `.github/sdlc-config.json` and must be `1`. A file without it, or with another value, now
-  stops the run. Add `"config_version": 1` to the project's config before bumping the engine pin.
+  stops the run. The config change and the pin bump must be in the SAME pull request: an engine without `config_version` support rejects
+  the key as unknown, and this engine rejects a file without it.
 - The stage workflow is no longer callable from a repository that carries its own `src/`: it now loads the engine from its own
   repository and commit (`job.workflow_repository` at `job.workflow_sha`) into `engine/`, and the project config from the
   caller's trigger commit into `project-config/`, instead of reading `src` and `.github/sdlc-config.json` from the caller's
@@ -17,7 +18,9 @@ Versioning. A released tag is never moved: a fix is a new version.
 - `python -m sdlc_engine check-project --root DIR`: checks the config, the roles, the caller workflow, the pin and the secrets
   of a consumer project (see `docs/CONFIG.md`). Standard library only, no network.
 - A verify step after every engine checkout fails the job unless the checkout is exactly `job.workflow_sha`, and writes that
-  commit to the job summary. There is no `engine_sha` input.
+  commit to the job summary. There is no `engine_sha` input. On a failed verification the step removes `engine/`, so later
+  steps cannot run an unverified checkout.
+- `check-project` rule `reserved`: fails when `engine` or `project-config` exists in the project root.
 
 ### Changed
 - `decide` and the budget gate run `PYTHONPATH="$TRUSTED_SRC" python -P` on the engine checkout, with `--config "$SDLC_CONFIG"`.
