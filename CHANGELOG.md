@@ -5,6 +5,10 @@ Versioning. A released tag is never moved: a fix is a new version.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-27
+
+The stage workflow is callable from another repository (D-004). **BREAKING**: read the two notes below before bumping a pin.
+
 ### BREAKING
 - `config_version` is required in `.github/sdlc-config.json` and must be `1`. A file without it, or with another value, now
   stops the run. The config change and the pin bump must be in the SAME pull request: an engine without `config_version` support rejects

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdlc-engine"
-version = "0.1.0"
+version = "0.2.0"
 description = "The deterministic half of an agentic SDLC: decides, checks and frames what agents do; the workflow only calls it."
 readme = "README.md"
 license = { file = "LICENSE" }
