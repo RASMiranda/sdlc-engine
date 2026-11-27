@@ -1,0 +1,32 @@
+name: Suggest a feature
+description: Something you want the project to do, or to do differently.
+title: "[feature] "
+labels: ["type:feature", "stage:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This repository is public.** Do not paste personal data, credentials or private documents.
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need
+      description: The problem or the goal, not the solution. Who is it for?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would done look like
+      description: What would you see or be able to do that you cannot today?
+  - type: input
+    id: context
+    attributes:
+      label: Context
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: There is no personal data or token in this request.
+          required: true

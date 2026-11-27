@@ -1,0 +1,8 @@
+# Replace @your-github-handle with the owner. Turn on "Require review from Code Owners" in the branch ruleset.
+*                                   @your-github-handle
+/.github/                           @your-github-handle
+/.claude/                           @your-github-handle
+/CLAUDE.md                          @your-github-handle
+/REVIEW.md                          @your-github-handle
+/docs/DECISIONS.md                  @your-github-handle
+/docs/SDLC.md                       @your-github-handle
