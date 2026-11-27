@@ -15,7 +15,10 @@ import json
 import re
 from pathlib import Path
 
-KEYS = {"default_branch", "agent_branch_prefix", "artifact_dir", "trusted_associations", "label_to_stage",
+# The version of this file's shape. A file with no version, or one this engine does not read, stops the run with a clear
+# message (D-004): a consumer that pins an engine release learns at once that the config and the engine disagree.
+CONFIG_VERSION = 1
+KEYS = {"config_version", "default_branch", "agent_branch_prefix", "artifact_dir", "trusted_associations", "label_to_stage",
         "requestable_labels", "stages", "protected_paths", "limits", "secret_patterns_extra", "budget", "model",
         "test", "git_identity", "commit_title", "pr_title", "runner"}
 # Optional (ADR-065): the project's own prompt text and budget handle. A file without them is valid and renders the
@@ -117,6 +120,11 @@ def problems_in(data):
     """Every reason ``data`` is not a valid sdlc config, as readable sentences. Empty when it is valid."""
     if not isinstance(data, dict):
         return ["the top level must be a JSON object"]
+    if "config_version" not in data:
+        return [f'config_version is missing: add "config_version": {CONFIG_VERSION} (this engine reads version '
+                f"{CONFIG_VERSION} only)"]
+    if type(data["config_version"]) is not int or data["config_version"] != CONFIG_VERSION:
+        return [f"config_version {data['config_version']!r} is not supported: this engine reads version {CONFIG_VERSION} only"]
     out = _key_problems(data, KEYS, "the file", OPTIONAL_KEYS)
     if out:
         return out

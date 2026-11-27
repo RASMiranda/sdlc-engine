@@ -1,16 +1,26 @@
-"""ADR-036: sdlc_engine steps that run after an agent use the code from the trigger commit, not the agent's branch.
-Parses the workflow file; no network, no git."""
+"""ADR-036, D-004: every sdlc_engine step uses the engine code from the called workflow's own repository and commit
+(the `engine` checkout), and the project config from the trigger commit (the `project-config` checkout), never code or
+config from the agent's branch or from the caller's workspace. Parses the workflow file; no network, no git."""
 import json
 from pathlib import Path
 
 import yaml
-from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, trusted_tree  # noqa: F401
+from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, sdlc_config_for, trusted_tree  # noqa: F401
 
 WORKFLOW = STAGE_WORKFLOW  # S2: the stage job lives here
 SECRETS = ("GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC", "CLAUDE_CODE_OAUTH_TOKEN")
 STAGE_AGENTS = "Run the stage agents"
 REVIEW_AGENTS = "Run the review agents"
 LOAD = "Trusted engine code"
+ALWAYS = "always() && steps.d.outputs.run == 'true'"
+ENGINE_WITH = {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}", "path": "engine",
+               "sparse-checkout": "src", "persist-credentials": False}
+CONFIG_WITH = {"repository": "${{ github.repository }}", "ref": "${{ github.sha }}", "path": "project-config",
+               "sparse-checkout": ".github/sdlc-config.json", "sparse-checkout-cone-mode": False,
+               "persist-credentials": False}
+PRE_DECIDE, PRE_AGENT, POST_AGENT, POST_REVIEW = ("Trusted engine code, before decide", "Trusted engine code, before the agent",
+                                                  "Trusted engine code, after the stage agents",
+                                                  "Trusted engine code, again after the reviewers")
 
 
 def steps():
@@ -47,10 +57,18 @@ SKIP_STEP = "Skip a stage whose output is already on the branch (ADR-057)"
 FRAME_STEP = "Frame the issue as untrusted input and write the stage prompt"
 
 
-def test_the_decide_and_budget_steps_keep_src_because_they_run_before_the_branch_is_checked_out():
-    # Before the branch checkout the checkout is the trigger commit (ADR-036), so src is trusted there.
-    before = steps()[:names().index(BRANCH_CHECKOUT)]
-    assert any("PYTHONPATH=src" in s.get("run", "") for s in before)
+def test_the_decide_and_budget_steps_use_the_engine_checkout_not_the_workspace_src():
+    # Before: they ran `PYTHONPATH=src python` from the caller's workspace, trusted only because it was the trigger commit,
+    # and a consumer has no src. Now they run the engine checkout, loaded by the group before them, with `python -P`.
+    n = names()
+    decide, budget = n.index("Decide what to run"), idx("Budget gate")[0]
+    load_use = n.index(f"{PRE_DECIDE} (5 of 5) use it (ADR-036, D-004)")
+    assert load_use < decide < budget < n.index(BRANCH_CHECKOUT)
+    for i in (decide, budget):
+        run = steps()[i]["run"]
+        assert 'PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine' in run, n[i]
+        assert "PYTHONPATH=src" not in run and "PYTHONPATH=src" not in str(steps()[i].get("env", "")), n[i]
+    assert not [s["name"] for s in steps() if "PYTHONPATH=src" in s.get("run", "")]      # nowhere in the workflow
 
 
 def test_no_helper_between_the_branch_checkout_and_the_agent_imports_the_branch_src():
@@ -65,27 +83,33 @@ def test_no_helper_between_the_branch_checkout_and_the_agent_imports_the_branch_
     assert any(s["name"] in (SKIP_STEP, FRAME_STEP) for s in window)     # the helpers are still there, just trusted
 
 
+def group(prefix):
+    """The five steps of one load, in order: clear, engine checkout, verify, config checkout, use it."""
+    found = [steps()[i] for i in range(len(steps())) if names()[i].startswith(prefix + " (")]
+    assert [s["name"][len(prefix) + 2:len(prefix) + 8] for s in found] == [f"{k} of 5" for k in range(1, 6)], prefix
+    first = names().index(found[0]["name"])
+    assert names()[first:first + 5] == [s["name"] for s in found]            # nothing sits between the five
+    return found
+
+
 def test_the_pre_agent_trusted_load_sits_right_after_the_branch_checkout_and_before_the_skip_step():
     n = names()
-    clear = idx("Trusted engine code, before the agent (1 of 3)")
-    fetch = idx("Trusted engine code, before the agent (2 of 3)")
-    use = idx("Trusted engine code, before the agent (3 of 3)")
-    assert len(clear) == len(fetch) == len(use) == 1
-    c, f, u = clear[0], fetch[0], use[0]
-    assert n.index(BRANCH_CHECKOUT) < c < f < u < n.index(SKIP_STEP)
+    clear, engine, verify, conf, use = group(PRE_AGENT)
+    c, u = n.index(clear["name"]), n.index(use["name"])
+    assert n.index(BRANCH_CHECKOUT) < c < u < n.index(SKIP_STEP)
     assert n[c - 1] == BRANCH_CHECKOUT and n[u + 1] == "Check the stage's input exists (the gate before it)"
     assert n.index(SKIP_STEP) < n.index(FRAME_STEP) < n.index(STAGE_AGENTS)
-    assert "rm -rf trusted" in steps()[c]["run"] and ".git/info/exclude" in steps()[c]["run"]
-    assert "TRUSTED_SRC" in steps()[u]["run"] and "test -f trusted/src/sdlc_engine/__init__.py" in steps()[u]["run"]
+    assert "rm -rf engine project-config" in clear["run"] and "/engine/" in clear["run"] and "/project-config/" in clear["run"]
+    assert ".git/info/exclude" in clear["run"] and "trusted" not in clear["run"]
+    assert "test -f engine/src/sdlc_engine/__init__.py" in use["run"]
+    assert 'echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"' in use["run"]
 
 
-def test_the_pre_agent_checkout_has_the_same_parameters_as_the_post_agent_one():
-    pre = next(s for s in steps() if s["name"].startswith("Trusted engine code, before the agent (2 of 3)"))
-    post = next(s for s in steps() if s["name"].startswith("Trusted engine code (2 of 3)"))
-    assert pre["uses"] == post["uses"] == "actions/checkout@v7"
-    assert pre["with"] == post["with"] == {"ref": "${{ github.sha }}", "path": "trusted", "sparse-checkout": "src\n.github\n",
-                                           "persist-credentials": False}
-    assert pre["if"] == post["if"] == "always() && steps.d.outputs.run == 'true'"
+def test_the_pre_agent_checkouts_have_the_same_parameters_as_the_other_loads():
+    for prefix in (PRE_DECIDE, PRE_AGENT, POST_AGENT, POST_REVIEW):
+        _, engine, _, conf, _ = group(prefix)
+        assert engine["uses"] == conf["uses"] == "actions/checkout@v7", prefix
+        assert engine["with"] == ENGINE_WITH and conf["with"] == CONFIG_WITH, prefix
 
 
 def test_the_helpers_before_the_agent_use_the_trusted_src_with_python_dash_p():
@@ -97,32 +121,33 @@ def test_the_helpers_before_the_agent_use_the_trusted_src_with_python_dash_p():
                 assert 'PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine' in line, (s["name"], line)
 
 
-def test_the_trusted_code_is_a_second_checkout_pinned_to_the_trigger_commit_and_never_git_archive():
+def test_the_engine_and_config_are_checkouts_of_pinned_commits_and_never_git_archive():
     text = WORKFLOW.read_text()
     assert "git archive" not in text
     checkouts = [s for s in steps() if s["name"].startswith(LOAD) and "uses" in s]
-    assert len(checkouts) == 3              # ADR-036 (i.F9): one before the agent, one after each of the two agent runs
+    assert len(checkouts) == 8              # four loads: before decide, before the agent, after each of the two agent runs
     for s in checkouts:
         assert s["uses"] == "actions/checkout@v7"   # bumped to Node 24 (ADR-057 item i.F5e)
-        assert s["with"] == {"ref": "${{ github.sha }}", "path": "trusted", "sparse-checkout": "src\n.github\n",
-                             "persist-credentials": False}
-        assert "always()" in s["if"] and not s.get("env")
+        assert s["with"] in (ENGINE_WITH, CONFIG_WITH), s["name"]
+        assert not s.get("env")
+        # every load runs always() once the decision says the run goes on; the first has no decision yet and no condition
+        assert s.get("if") == (None if s["name"].startswith(PRE_DECIDE) else ALWAYS), s["name"]
+    assert sum(s["with"]["path"] == "engine" for s in checkouts) == sum(s["with"]["path"] == "project-config" for s in checkouts) == 4
 
 
 def test_each_trusted_load_follows_its_agent_run_and_precedes_the_steps_that_import_sdlc_engine():
     n = names()
-    clear = idx("Trusted engine code (1 of 3)"), idx("Trusted engine code, again after the reviewers (1 of 3)")
-    use = idx("Trusted engine code (3 of 3)"), idx("Trusted engine code, again after the reviewers (3 of 3)")
-    assert len(clear[0]) == len(clear[1]) == len(use[0]) == len(use[1]) == 1
-    c1, c2, u1, u2 = clear[0][0], clear[1][0], use[0][0], use[1][0]
+    c1, u1 = n.index(group(POST_AGENT)[0]["name"]), n.index(group(POST_AGENT)[4]["name"])
+    c2, u2 = n.index(group(POST_REVIEW)[0]["name"]), n.index(group(POST_REVIEW)[4]["name"])
     assert n.index(STAGE_AGENTS) < c1 < u1 < n.index("Check what the agent changed")
     assert u1 < idx("Commit and push")[0] < n.index(REVIEW_AGENTS)
     # the second load comes after both agent runs, before the reviewer check and the post step
     assert n.index(REVIEW_AGENTS) < c2 < u2 < n.index("Reject any change the reviewers made") < idx("Post the report")[0]
-    # a clear step runs right before its checkout, and the folder is hidden from git status
-    assert n[c1 + 1].startswith("Trusted engine code (2 of 3)") and n[c2 + 1].startswith("Trusted engine code, again")
+    # a clear step runs right before its checkout, and the folders are hidden from git status
+    assert n[c1 + 1].startswith(f"{POST_AGENT} (2 of 5)") and n[c2 + 1].startswith(f"{POST_REVIEW} (2 of 5)")
     for i in (c1, c2):
-        assert "rm -rf trusted" in steps()[i]["run"] and ".git/info/exclude" in steps()[i]["run"]
+        assert "rm -rf engine project-config" in steps()[i]["run"] and ".git/info/exclude" in steps()[i]["run"]
+        assert "trusted" not in steps()[i]["run"]
 
 
 def test_the_load_steps_have_no_token():
@@ -132,11 +157,13 @@ def test_the_load_steps_have_no_token():
             assert "GH_TOKEN" not in str(s) and "secrets." not in str(s) and "github.token" not in str(s)
 
 
-def test_the_use_step_exports_the_src_of_the_trusted_checkout():
-    for s in steps():
-        if s["name"].startswith(LOAD) and "(3 of 3)" in s["name"]:
-            assert 'echo "TRUSTED_SRC=$GITHUB_WORKSPACE/trusted/src" >> "$GITHUB_ENV"' in s["run"]
-            assert "test -f trusted/src/sdlc_engine/__init__.py" in s["run"]
+def test_the_use_step_exports_the_src_of_the_engine_checkout_and_the_config_of_the_project_checkout():
+    uses = [s for s in steps() if s["name"].startswith(LOAD) and "(5 of 5)" in s["name"]]
+    assert len(uses) == 4
+    for s in uses:
+        assert 'echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"' in s["run"]
+        assert 'echo "SDLC_CONFIG=$GITHUB_WORKSPACE/project-config/.github/sdlc-config.json" >> "$GITHUB_ENV"' in s["run"]
+        assert "test -f engine/src/sdlc_engine/__init__.py" in s["run"]
 
 
 def test_every_token_step_after_the_stage_agents_that_imports_sdlc_engine_runs_after_a_trusted_load():
@@ -157,7 +184,8 @@ def _shell(step_run, cwd, extra):
     if not shutil.which("bash"):
         pytest.skip("needs bash")
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}     # the step must not depend on a PYTHONPATH=src
-    env.update({"TRUSTED_SRC": str(trusted_tree(cwd.parent, name=f"trusted-{cwd.name}")), "GITHUB_ENV": str(cwd / "github.env"),
+    env.update({"TRUSTED_SRC": str(trusted_tree(cwd.parent, name=f"trusted-{cwd.name}")),
+                "SDLC_CONFIG": str(sdlc_config_for(trusted_tree(cwd.parent, name=f"trusted-{cwd.name}"))), "GITHUB_ENV": str(cwd / "github.env"),
                 "GITHUB_OUTPUT": str(cwd / "github.out"), "NUMBER": "7", **extra})
     return subprocess.run(["bash", "-e", "-c", step_run], cwd=cwd, env=env, capture_output=True, text=True)
 

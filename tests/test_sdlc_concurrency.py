@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 import sdlc_engine as sdlc
+from sdlc_engine.project_check import inner_expression, json_lists
 from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, trusted_tree  # noqa: F401
 
 WF = FIXTURE / ".github" / "workflows" / "sdlc.yml"
@@ -128,9 +129,9 @@ def evaluate(src, ctx):
 
 
 def _inner(s):
-    m = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", s, re.S)
-    assert m, s
-    return m.group(1).strip()
+    inner = inner_expression(s)         # the package's own helper: `check-project` reads the same expressions
+    assert inner is not None, s
+    return inner
 
 
 GROUP = _inner(WORKFLOW["concurrency"]["group"])
@@ -225,7 +226,7 @@ def test_the_workflow_filter_agrees_with_decide(name, ev):
 
 
 def test_the_label_and_author_lists_in_the_yaml_are_exactly_the_ones_decide_uses():
-    lists = [set(json.loads(m)) for m in re.findall(r"fromJSON\('([^']*)'\)", JOB_IF)]
+    lists = [set(v) for v in json_lists(JOB_IF)]
     assert lists == [sdlc.TRUSTED, set(sdlc.LABEL_TO_STAGE)]
 
 

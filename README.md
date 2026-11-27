@@ -52,6 +52,8 @@ uses: RASMiranda/sdlc-engine/.github/workflows/sdlc-stage.yml@<full-40-hex-commi
 Never `@main`, never a branch, and never a floating tag such as `@v0`. A branch or a floating tag can change under you
 without a pull request in your repository; a commit SHA cannot. The same rule applies to every third-party action in your
 own workflows. To upgrade, change the SHA and the comment in a pull request and read the engine's `CHANGELOG.md` first.
+To check a project against the engine it pins (config, roles, caller workflow, pin, secrets), run
+`python -m sdlc_engine check-project --root .`; see `docs/CONFIG.md`.
 
 ## Develop
 

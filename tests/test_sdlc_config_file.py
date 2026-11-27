@@ -22,8 +22,7 @@ from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW
 CONFIG = FIXTURE / ".github" / "sdlc-config.json"                # the fixture project's config
 WORKFLOW = STAGE_WORKFLOW                                        # S2: the stage job lives here (the engine's own file)
 TESTS_WORKFLOW = FIXTURE / ".github" / "workflows" / "tests.yml"  # the project's tests workflow
-TRUSTED_CONFIG = '--config "$TRUSTED_SRC/../.github/sdlc-config.json"'   # after the trusted copy exists
-WORKSPACE_CONFIG = "--config .github/sdlc-config.json"                   # decide and budget: the trigger commit
+PROJECT_CONFIG = '--config "$SDLC_CONFIG"'      # every engine call, decide and budget included (D-004)
 LOAD = "Trusted engine code"
 ENGINE_NAMES = ("AGENT_BRANCH_PREFIX", "TRUSTED", "WORK", "LABEL_TO_STAGE", "REQUESTABLE_LABELS", "STAGES", "PROTECTED",
                 "MAX_FILES", "MAX_ADDED_BYTES", "_CREDENTIAL", "SECRET_PATTERNS_EXTRA", "PROMPT")
@@ -70,11 +69,6 @@ def run_steps():
     """Every `run:` script of the stage job, in order, with its step name."""
     steps = yaml.safe_load(WORKFLOW.read_text())["jobs"]["stage"]["steps"]
     return [(s.get("name", ""), s["run"]) for s in steps if "run" in s]
-
-
-def covers(entry, path):
-    entry = entry.rstrip("/")
-    return path == entry or path.startswith(entry + "/")
 
 
 # ------------------------------------------------------- (a) the file holds the built-in values
@@ -230,31 +224,30 @@ def test_the_engine_uses_the_values_in_the_file_it_is_given(engine, tmp_path, cf
     assert engine.AGENT_BRANCH_PREFIX == "bot/"
 
 
-# ------------------------------------------------------- (d) every trusted checkout fetches the file
-def trusted_checkouts():
+# ------------------------------------------------------- (d) every trusted load fetches the file, and every call reads it from there
+def config_checkouts():
     steps = yaml.safe_load(WORKFLOW.read_text())["jobs"]["stage"]["steps"]
-    return [s for s in steps if s.get("name", "").startswith(LOAD) and "uses" in s]
+    return [s for s in steps if s.get("name", "").startswith(LOAD) and "uses" in s and s["with"].get("path") == "project-config"]
 
 
-def test_every_trusted_checkout_fetches_the_config_file_and_the_src():
-    checkouts = trusted_checkouts()
-    assert len(checkouts) == 3
+def test_every_trusted_load_checks_out_the_config_file_from_the_trigger_commit():
+    checkouts = config_checkouts()
+    assert len(checkouts) == 4              # before decide, before the agent, after the stage agents, after the reviewers
     for s in checkouts:
+        assert s["with"]["repository"] == "${{ github.repository }}" and s["with"]["ref"] == "${{ github.sha }}", s["name"]
         entries = [line.strip() for line in s["with"]["sparse-checkout"].splitlines() if line.strip()]
-        assert "src" in entries, s["name"]
-        assert any(covers(entry, ".github/sdlc-config.json") for entry in entries), s["name"]
-        assert s["with"]["path"] == "trusted" and s["with"]["ref"] == "${{ github.sha }}", s["name"]
+        assert entries == [".github/sdlc-config.json"], s["name"]
+        assert s["with"]["sparse-checkout-cone-mode"] is False and s["with"]["persist-credentials"] is False, s["name"]
 
 
 def test_every_engine_call_passes_the_config_it_reads():
-    """Before the trusted copy exists, decide and budget read the trigger commit's file; after it, the trusted copy's."""
+    """D-004: decide and budget no longer read the workspace; every call, first to last, reads the one config path the
+    use-it step exports, with the engine's code from the engine checkout."""
     calls = [(name, line) for name, script in run_steps() for line in script.splitlines() if "-m sdlc_engine" in line]
     assert calls
     for name, line in calls:
-        if "$TRUSTED_SRC" in line:
-            assert TRUSTED_CONFIG in line, (name, line)
-        else:
-            assert WORKSPACE_CONFIG in line and "PYTHONPATH=src" in line, (name, line)
+        assert PROJECT_CONFIG in line and 'PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine' in line, (name, line)
+        assert "PYTHONPATH=src" not in line and ".github/sdlc-config.json" not in line, (name, line)
 
 
 def test_the_file_the_first_steps_read_is_in_the_repository_root_config_dir():

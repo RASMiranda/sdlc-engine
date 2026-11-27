@@ -5,8 +5,11 @@ A project gives the engine its values in one file, `.github/sdlc-config.json`. T
 
 How the file is read:
 
-- The workflow passes it with `--config`, taken from the **trigger commit** (the default branch), never from an agent
-  branch. A change to it takes effect only once a human has merged it.
+- The workflow passes it with `--config "$SDLC_CONFIG"`, a sparse checkout of the **trigger commit** of the caller (the
+  default branch's commit for an issue event) into `project-config/`, never the agent's branch and never the workspace
+  root. A change to it takes effect only once a human has merged it.
+- It must carry `"config_version": 1`. A file with no version, or a version this engine does not read, stops the run with a
+  message that says so. A change to the shape of the file will bump the version and say BREAKING in `CHANGELOG.md`.
 - A malformed file stops the run. A `--config` path that names no file stops the run. Nothing falls back silently,
   because a wrong value could let a stage write where it must not.
 - With no `--config` at all, the engine's built-in values apply. They are generic: they name no project.
@@ -20,6 +23,7 @@ Every key below is required unless it says optional. An unknown key is an error.
 
 | Key | Type | Meaning |
 |---|---|---|
+| `config_version` | whole number | The shape of this file. Must be `1`; any other value, or none, stops the run. |
 | `default_branch` | text | The branch pull requests target and the diff base (`origin/<branch>...HEAD`). |
 | `agent_branch_prefix` | text | Prefix of the branch an agent works on: `<prefix><issue number>-<slug>`. |
 | `artifact_dir` | text | Folder each issue's stage documents live in. Only `{n}` (issue number) and `{slug}` may appear. |
@@ -134,3 +138,27 @@ the default, never unlimited.
 | Secret | Meaning |
 |---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | The token the agent steps authenticate with. The caller workflow passes it to the stage workflow **by name**; it never uses `secrets: inherit`. The engine repository holds no secret of its own. |
+
+## Checking a project: `check-project`
+
+```bash
+git clone https://github.com/RASMiranda/sdlc-engine /tmp/sdlc-engine
+git -C /tmp/sdlc-engine checkout <the full 40-hex sha your sdlc.yml pins>
+PYTHONPATH=/tmp/sdlc-engine/src python -P -m sdlc_engine check-project --root .
+```
+
+It reads files under `--root` only (standard library, no network, no git) and prints one plain message per failure to
+standard error, each starting with the rule that failed. **Exit 1** on any failure, **0** when there is none (it then prints one
+`ok:` line). Run it from the project root before a bump pull request is merged.
+
+| Rule | Fails when |
+|---|---|
+| `config` | `.github/sdlc-config.json` is missing or not JSON, `config_version` is missing or not `1`, a required key is missing or unknown, or a value has the wrong type. The keys and types are the ones the engine itself enforces. |
+| `roles` | A role named in `stages` has no `.claude/agents/<role>.md`. |
+| `caller` | `.github/workflows/sdlc.yml` has no job `stage`, cannot be read, or differs from the config: the two `fromJSON` lists (author associations, then labels) in the job `if` and in the concurrency group must equal `trusted_associations` and the keys of `label_to_stage`, and `on.issues.types` must be exactly `opened` and `labeled`. |
+| `pin` | The `stage` job's `uses:` is not `RASMiranda/sdlc-engine/.github/workflows/sdlc-stage.yml@` followed by 40 lowercase hex characters. A tag, a branch, a short sha, `./` or another repository fails. A trailing `# v0.2.0` comment is fine. |
+| `secrets` | The call does not pass `CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`, uses `secrets: inherit`, passes any other secret, or passes a literal value. |
+
+The stage workflow has no inputs, so there is no engine input to compare. The caller file is read by a small reader for
+the YAML a caller uses; a file outside that subset (anchors, multi-line values) fails with "cannot be read" instead of being
+guessed at. `check-project` does not say whether the pinned sha is the newest engine release.

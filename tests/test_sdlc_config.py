@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 import sdlc_engine as sdlc
-from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, trusted_tree
+from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, sdlc_config_for, trusted_tree
 
 WF = FIXTURE / ".github" / "workflows"                  # the project: caller, labels, tests
 LABELS = {l["name"] for l in json.loads((FIXTURE / ".github/labels.json").read_text())}
@@ -267,7 +267,7 @@ def run_post_step(tmp_path, env_extra, files):
         pytest.skip("needs bash")
     step = next(s for s in steps("sdlc-stage") if str(s.get("name", "")).startswith("Post the report"))
     (tmp_path / "src").symlink_to(ENGINE / "src")                           # the step runs from the repository root
-    trusted = trusted_tree(tmp_path)                                       # $TRUSTED_SRC/../.github/sdlc-config.json resolves here
+    trusted = trusted_tree(tmp_path)                                       # $SDLC_CONFIG resolves into it
     (tmp_path / ".sdlc").mkdir()
     for name, text in files.items():
         (tmp_path / ".sdlc" / name).write_text(text)
@@ -283,6 +283,7 @@ def run_post_step(tmp_path, env_extra, files):
     env.pop("blocked", None) if "blocked" not in env_extra else None
     env.pop("PYTHONPATH", None)
     env.setdefault("TRUSTED_SRC", str(trusted))                  # ADR-036: the post step imports sdlc_engine from here
+    env.setdefault("SDLC_CONFIG", str(sdlc_config_for(trusted)))   # D-004: and reads the project's config from here
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True, capture_output=True)
     return (tmp_path / "posted.txt").read_text()
 
@@ -393,7 +394,7 @@ def test_a_blocked_run_removes_the_build_report_so_no_agent_text_is_left_to_post
 
 def test_the_draft_pr_body_comes_from_the_tested_function_and_only_type_labels_are_copied():
     text = STAGE_WORKFLOW.read_text()
-    assert "Refs #" not in text and '-m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" pr-body' in text
+    assert "Refs #" not in text and '-m sdlc_engine --config "$SDLC_CONFIG" pr-body' in text
     assert 'type:*) gh pr edit "$PR_NEW" --add-label "$l"' in text
     assert "agent:*) gh pr edit" not in text and "stage:*) gh pr edit" not in text
 
@@ -410,8 +411,13 @@ def test_the_workflow_never_writes_agent_output_to_the_job_summary():
     start = text.index("      - name: Budget gate")
     end = text.index("      - name: Check out the issue's branch")
     # ADR-067: the review step also writes one summary: tags, line numbers and changed-file names, built by trusted code.
+    # D-004: each engine checkout is followed by a verify step that writes one line to the summary: the called workflow's
+    # repository and the commit, both from env (job.workflow_*), never agent text. Four checkouts, so four lines.
+    verify_line = ('echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow\'s own repository and commit)"'
+                   ' >> "$GITHUB_STEP_SUMMARY"')
+    assert text.count(verify_line) == 4
     rest = (text[:start] + text[end:]).replace('cat .sdlc/denial-summary.txt >> "$GITHUB_STEP_SUMMARY"', "") \
-        .replace('cat .sdlc/review-summary.txt >> "$GITHUB_STEP_SUMMARY"', "")
+        .replace('cat .sdlc/review-summary.txt >> "$GITHUB_STEP_SUMMARY"', "").replace(verify_line, "")
     assert "GITHUB_STEP_SUMMARY" not in rest
     assert ".sdlc/post.md" not in text[start:end]
 
@@ -429,7 +435,7 @@ def test_each_agent_step_has_an_id_and_its_execution_file_is_copied_right_after_
     for step_id, keep_name, kept, previous in (
             ("agent", "Keep the stage agent's execution file (ADR-055)", "exec-stage.json", "Check what the agent changed"),
             ("review", "Keep the review agents' execution file (ADR-055)", "exec-review.json",
-             "Trusted engine code, again after the reviewers (3 of 3) use it (ADR-036)")):
+             "Trusted engine code, again after the reviewers (5 of 5) use it (ADR-036, D-004)")):
         k = names.index(keep_name)
         keep = all_steps[k]
         assert names[k - 1] == previous
