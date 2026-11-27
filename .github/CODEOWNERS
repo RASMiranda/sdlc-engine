@@ -1,0 +1,12 @@
+# The maintainer reviews everything. The protect-main ruleset requires Code Owner review, which does nothing without this file.
+# The last matching pattern wins, so the specific lines below only name the paths that matter most.
+*                                   @RASMiranda
+/.github/                           @RASMiranda
+/src/                               @RASMiranda
+/template/                          @RASMiranda
+/tests/                             @RASMiranda
+/docs/                              @RASMiranda
+/pyproject.toml                     @RASMiranda
+/LICENSE                            @RASMiranda
+/SECURITY.md                        @RASMiranda
+/CHANGELOG.md                       @RASMiranda
