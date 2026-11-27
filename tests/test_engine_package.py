@@ -11,9 +11,9 @@ from test_guard_engine import ENGINE_REPO, HANDLE
 PYPROJECT = tomllib.loads((ENGINE / "pyproject.toml").read_text(encoding="utf-8"))
 
 
-def test_the_package_is_sdlc_engine_version_0_2_0_for_python_3_12_and_up():
+def test_the_package_is_sdlc_engine_version_0_2_1_for_python_3_12_and_up():
     project = PYPROJECT["project"]
-    assert project["name"] == "sdlc-engine" and project["version"] == "0.2.0"
+    assert project["name"] == "sdlc-engine" and project["version"] == "0.2.1"
     assert project["requires-python"] == ">=3.12"
 
 

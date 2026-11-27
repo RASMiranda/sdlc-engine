@@ -148,7 +148,7 @@ PYTHONPATH=/tmp/sdlc-engine/src python -P -m sdlc_engine check-project --root .
 ```
 
 It reads files under `--root` only (standard library, no network, no git) and prints one plain message per failure to
-standard error, each starting with the rule that failed (`reserved`, `config`, `roles`, `caller`, `pin`, `secrets`). **Exit 1** on any failure, **0** when there is none (it then prints one
+standard error, each starting with the rule that failed (`reserved`, `config`, `roles`, `caller`, `triggers`, `pin`, `secrets`). **Exit 1** on any failure, **0** when there is none (it then prints one
 `ok:` line). Run it from the project root before a bump pull request is merged.
 
 | Rule | Fails when |
@@ -157,6 +157,7 @@ standard error, each starting with the rule that failed (`reserved`, `config`, `
 | `config` | `.github/sdlc-config.json` is missing or not JSON, `config_version` is missing or not `1`, a required key is missing or unknown, or a value has the wrong type. The keys and types are the ones the engine itself enforces. |
 | `roles` | A role named in `stages` has no `.claude/agents/<role>.md`. |
 | `caller` | `.github/workflows/sdlc.yml` has no job `stage`, cannot be read, or differs from the config: the two `fromJSON` lists (author associations, then labels) in the job `if` and in the concurrency group must equal `trusted_associations` and the keys of `label_to_stage`, and `on.issues.types` must be exactly `opened` and `labeled`. |
+| `triggers` | The caller's `on:` is anything but a mapping with exactly one key, `issues`. Each other event (`workflow_dispatch`, `pull_request`, `pull_request_target`, `push`, `schedule`, `workflow_run`, ...) is one failure. The job `if` and `decide` vet issue events only; any other trigger would start a job that holds write permissions and the token. |
 | `pin` | The `stage` job's `uses:` is not `RASMiranda/sdlc-engine/.github/workflows/sdlc-stage.yml@` followed by 40 lowercase hex characters. A tag, a branch, a short sha, `./` or another repository fails. A trailing `# v0.2.0` comment is fine. |
 | `secrets` | The call does not pass `CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`, uses `secrets: inherit`, passes any other secret, or passes a literal value. |
 

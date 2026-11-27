@@ -5,11 +5,20 @@ Versioning. A released tag is never moved: a fix is a new version.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-27
+
 ### Added
-- `.github/workflows/release.yml`: merging a release PR into `main` creates the annotated `vX.Y.Z` tag and the release from
-  the top `CHANGELOG.md` section, and does nothing when the tag already exists (D-005).
-- `python -m sdlc_engine release-notes`: prints the newest released version and writes its notes; fails when the changelog,
-  `pyproject.toml` and the engine disagree or the notes are empty.
+- `check-project` rule `triggers`: the caller's `on:` must have exactly one key, `issues`. Any other event
+  (`workflow_dispatch`, `pull_request*`, `push`, `schedule`, ...) fails, one message per event (D-006).
+
+### Changed
+- `.github/workflows/release.yml` runs in one concurrency group, `release`, with `cancel-in-progress: false`: one release
+  job at a time, and a running one is never cancelled (D-006).
+
+### Note on v0.2.0
+- v0.2.0 was tagged by the release workflow at 63c214c (the D-005 merge), not at ee3604d. It therefore also contains the
+  release workflow and `release-notes` listed under Unreleased at that tag. The stage workflow is identical at both
+  commits. Pin v0.2.0 as 63c214c9aa9d2226ab6c107d843932d520fd664f.
 
 ## [0.2.0] - 2026-11-27
 

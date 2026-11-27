@@ -10,6 +10,11 @@ on:
 
 permissions: {}
 
+# D-006: one release job at a time. A second run waits instead of racing the first to the same tag; it is never cancelled.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-24.04

@@ -161,3 +161,37 @@ Consequences.
   merge commit of the workflow PR as `v0.2.0` instead.
 * Not verified (no workflow runs from the session): that job-level `contents: write` is honoured under the repository's
   read-only default, and that the tag ruleset admits the Actions app's tag creation. The first release run shows both.
+
+## D-006: v0.2.0 stays at 63c214c; callers are issue-triggered only; one release job at a time (2026-11-27, Bangkok)
+
+Context. v0.2.0 was meant to sit on ee3604d, the 0.2.0 release commit. The agent session could not push a tag, and the tag
+was not created by hand before the D-005 workflow PR merged. That merge changed `CHANGELOG.md` while the top section was
+still the untagged `[0.2.0]`, so the release workflow did exactly what D-005 says: it tagged the merge commit, 63c214c, as
+v0.2.0 and published an immutable release. Separately, `check-project` checked the caller's `on.issues.types` but not
+whether other events were also listed, and two release runs could start close together.
+
+Decision.
+
+1. **v0.2.0 stays at 63c214c9aa9d2226ab6c107d843932d520fd664f.** It is not moved, re-created or deleted (D-001 d, D-002); the
+   tag ruleset and the immutable release would refuse it anyway. At that commit v0.2.0 also contains the release workflow
+   and `release-notes`, which its changelog lists under Unreleased. The stage workflow is byte-identical at ee3604d and
+   63c214c, so a consumer gets the same stage behaviour from either; a consumer pins v0.2.0 as 63c214c.
+2. **`check-project` rule `triggers`.** The caller's `on:` must be a mapping with exactly one key, `issues`. Any other key
+   is one failure, named. The caller's job `if` and `decide` vet issue events only; another trigger
+   (`workflow_dispatch`, `pull_request_target`, `push`, `schedule`, ...) would start a job that holds write permissions
+   and the OAuth secret on input nothing here checks.
+3. **`release.yml` concurrency.** `concurrency: {group: release, cancel-in-progress: false}` at workflow level: one release
+   job at a time, and a running one is never cancelled between its tag and its release.
+4. **0.2.1** carries both, released by merging its release PR (D-005).
+
+Consequences.
+
+* The rule for the next release: create no tag by hand, and keep a release PR the only change that adds a versioned
+  section on top of `CHANGELOG.md`. Merging any `CHANGELOG.md` change while the top section is untagged releases that
+  commit.
+* GitHub keeps at most one pending run per concurrency group: if a third release run queues while one runs and one waits,
+  the waiting one is replaced. Each run reads the changelog at its own commit and skips a version already tagged, so a
+  replaced run releases nothing that a later run does not; the later run tags its own commit.
+* A consumer whose caller lists another event next to `issues` fails `check-project` from 0.2.1 on. The template and the
+  fixture callers are issue-only.
+* Not verified (no workflow run from the session): the concurrency group's behaviour on two close pushes.
