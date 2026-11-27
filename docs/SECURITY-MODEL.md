@@ -93,6 +93,13 @@ token. The settings are recorded in D-002 (`docs/DECISIONS.md`): a branch rulese
 owner's review, an immutable `v*` tag ruleset, read-only workflow permissions, secret scanning with push protection, immutable
 releases, and no secrets or variables at all. The engine holds no secret; consumers pass theirs by name.
 
+**Who can cut a release (D-005).** Only a merge into `main`, which the branch ruleset limits to a pull request with a code
+owner's approval. A release PR moves the `[Unreleased]` notes under a new `## [X.Y.Z] - YYYY-MM-DD` heading and bumps the
+version; merging it starts `.github/workflows/release.yml`, which checks that the changelog, `pyproject.toml` and the engine
+agree, then creates the annotated `vX.Y.Z` tag on the merged commit and the release. That job holds `contents: write` and
+nothing else, and only its tag and release steps see the token. It never touches an existing tag. No person and no agent
+pushes a release tag by hand; the agent session cannot push tags at all.
+
 The engine also holds no project name, no personal data and no secret. `tests/test_guard_engine.py` fails the build if a
 tracked file contains a project name, a maintainer handle, an email address or a phone number outside a short, explicit
 allow-list.
