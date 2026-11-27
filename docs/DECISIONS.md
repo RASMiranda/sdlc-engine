@@ -79,3 +79,52 @@ Consequences.
 * The two email literals are a standing exception. A third needs a new decision.
 * The goldens are rendered from the fixture project, not from a real project's config. A consumer that wants its own prompt
   text pinned byte for byte keeps its own golden files.
+
+## D-004: The stage workflow becomes callable from another repository (2026-11-27, Bangkok)
+
+Context. Step f of the extraction (D-001). The stage workflow loaded the engine with `PYTHONPATH=src` for `decide` and the budget
+gate, and from a `trusted/` checkout of the caller's trigger commit afterwards, so it only worked in a repository that carries
+its own `src/` and config. A consumer has neither. A spike measured that `${{ job.workflow_repository }}` and
+`${{ job.workflow_sha }}` are available in a step's `with:`, are the called workflow's own repository and commit, and need no
+`id-token` permission.
+
+Decision.
+
+1. **Engine code** comes from `actions/checkout@v7` with `repository: ${{ job.workflow_repository }}`, `ref: ${{ job.workflow_sha }}`,
+   `path: engine`, `sparse-checkout: src`, `persist-credentials: false`. This is done before `decide` (a new first load) and in the
+   three existing loads. `TRUSTED_SRC` is `$GITHUB_WORKSPACE/engine/src`.
+2. **No `engine_sha` input.** The engine version is the consumer's pinned `uses:` line, nothing else.
+3. **Verified at run time.** After every engine checkout a step fails the job unless `git -C engine rev-parse HEAD` equals
+   `job.workflow_sha`; both values reach it through `env` and it writes the sha to the job summary.
+4. **Project config** comes from a sparse checkout of the caller at `github.sha` (the default branch's commit for an issue event)
+   into `project-config/`, in every load. `SDLC_CONFIG` is exported by the same step as `TRUSTED_SRC`; every `--config` is
+   `"$SDLC_CONFIG"`. Nothing reads config from the workspace root or the agent's branch. That checkout also sets
+   `sparse-checkout-cone-mode: false`, so the one file is matched as a file and not as a cone directory.
+5. **decide and budget** moved onto the engine checkout: `PYTHONPATH="$TRUSTED_SRC" python -P`, as every other step already ran.
+6. **`check-project`** (`python -m sdlc_engine check-project --root DIR`, standard library only, in `src/sdlc_engine/project_check.py`):
+   the config validates (the engine's own validator, so no second key list) at `config_version` 1; every stage role has its
+   agent file; the caller's label and association lists and `on.issues.types` equal the config and the engine's constant;
+   the stage job's `uses:` is this repository's stage workflow at a 40-lowercase-hex sha; the call passes
+   `CLAUDE_CODE_OAUTH_TOKEN` by name and nothing else (`secrets: inherit` fails). It compares no engine input. PyYAML is a test
+   dependency, so the caller file is read by a small reader for the YAML subset a caller uses; anything outside it fails.
+7. **`config_version` 1** is required in `.github/sdlc-config.json`; `config.load` stops the run on a missing or unknown version.
+   The template and the fixture carry it.
+8. `tests/test_guard_engine.py` allows the literal of this repository's own path in `src/sdlc_engine/project_check.py`, and nowhere
+   else under `src/` or `tests/`: the pin rule has to name the one repository it accepts.
+
+Consequences.
+
+* The config change (adding `config_version`) and the pin bump must be in the SAME pull request, because an engine without
+  `config_version` support rejects the key as unknown and this engine rejects a file without it.
+* A failed engine verification removes `engine/` so later steps cannot run an unverified checkout.
+* `check-project` fails on a tracked or untracked `engine/` or `project-config/` folder (rule `reserved`).
+* BREAKING: a project's config needs `config_version`, and the workflow cannot be called from a repository whose own `src/` it
+  would have used. `engine/` and `project-config/` are reserved folder names in the caller's workspace.
+* `permissions`, triggers, concurrency, tool lists, the model, token handling and the deny rules are unchanged. `id-token: write`
+  stays at job level for claude-code-action; nothing else gains it.
+* A bump PR in a consumer can run `check-project` against the new pin before merging.
+* The engine's own CI is not a consumer: `check-project` fails the checked-in fixture on the pin rule, by design (it uses `./`).
+* Not verified: `job.workflow_*` inside a real cross-repo call, covered by the first canary. Also not verified, because there was no
+  network: `sparse-checkout-cone-mode: false` with a single file path in `actions/checkout`; the canary covers it. Each is covered
+  by the verify step or by a failed `--config` (a missing config file stops the run), so a wrong guess stops a run rather than running other code.
+

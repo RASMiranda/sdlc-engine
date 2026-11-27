@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 import sdlc_engine as sdlc
-from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, trusted_tree  # noqa: F401
+from engine_paths import ENGINE, FIXTURE, STAGE_WORKFLOW, sdlc_config_for, trusted_tree  # noqa: F401
 
 WF = yaml.safe_load(STAGE_WORKFLOW.read_text())  # S2: the stage job lives here
 STEPS = WF["jobs"]["stage"]["steps"]
@@ -111,7 +111,8 @@ def _post_run(tmp_path, env_extra):
     gh.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexit 0\n')
     gh.chmod(0o755)
     env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "PYTHONPATH": str(ENGINE / "src"),
-           "TRUSTED_SRC": str(trusted_tree(tmp_path)), "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+           "TRUSTED_SRC": str(trusted_tree(tmp_path)), "SDLC_CONFIG": str(sdlc_config_for(trusted_tree(tmp_path))),
+           "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "NUMBER": str(N), "TRIGGER_LABEL": "agent:spec",
            "STAGE": "spec", "ROLES": "product-owner", "REJECTED": "success", "BRANCH": "", "AGENT_REPORT": "true",
            "SKIPPED": "", "STOP": "", **env_extra}

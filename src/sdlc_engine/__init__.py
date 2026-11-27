@@ -28,7 +28,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from . import config, review, rounds
+from . import config, project_check, review, rounds
 
 
 def engine_version() -> str:
@@ -808,7 +808,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-answer", help="the verifier's final message, from its execution file (ADR-068)")
     p.add_argument("--exec", required=True)
     p.add_argument("--out", required=True)
+    p = sub.add_parser("check-project", help="does the project under --root fit this engine? (D-004)")
+    p.add_argument("--root", required=True, help="the project's root folder")
     args = ap.parse_args(argv)
+    if args.cmd == "check-project":
+        return project_check.command(args)
 
     load = lambda f: json.loads(Path(f).read_text(encoding="utf-8")) if f and Path(f).is_file() else []  # noqa: E731
     if args.cmd == "decide":

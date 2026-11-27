@@ -93,7 +93,7 @@ def test_a_blocked_round_skips_the_review_and_its_diff_and_prompt_steps():
 
 def test_the_verifier_is_after_the_reviewers_reload_and_before_the_reject_step_with_its_own_token_reset():
     names = [s["name"] for s in steps()]
-    reload_after_reviewers = names.index("Trusted engine code, again after the reviewers (3 of 3) use it (ADR-036)")
+    reload_after_reviewers = names.index("Trusted engine code, again after the reviewers (5 of 5) use it (ADR-036, D-004)")
     assert reload_after_reviewers < position(PREP) < position(VERIFY) < position("Reject any change the reviewers made")
     reset = names[position(VERIFY) + 1]
     assert reset.startswith("Remove the token the action wrote after the verifier")

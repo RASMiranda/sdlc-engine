@@ -76,6 +76,8 @@ def allowed_for(rel):
         rules["literals"] = [SOURCE_REPO, ENGINE_REPO]             # ADR citations and the repository URL
     elif rel in ("README.md", "pyproject.toml"):
         rules["literals"] = [ENGINE_REPO]                        # clone and project URLs only
+    elif rel == "src/sdlc_engine/project_check.py":
+        rules["literals"] = [ENGINE_REPO]                        # the one repository `check-project` accepts in a pin (D-004)
     # template/ and tests/fixture-project/ get no allowance: a placeholder handle is not a banned word.
     return rules
 
@@ -271,3 +273,13 @@ def test_a_binary_file_is_skipped(tmp_path):
     path = tmp_path / "x.bin"
     path.write_bytes(b"\0\1\2" + NAME_A.encode())
     assert violations(tmp_path, ["x.bin"]) == []
+
+
+def test_the_engines_own_repository_path_is_allowed_in_the_pin_rule_only(tmp_path):
+    """D-004: `check-project` must name the one repository a consumer may call. That literal, whole, is allowed in that
+    one module and nowhere else under src/ or tests/; a bare handle is still banned there."""
+    line = f'ENGINE_REPO = "{ENGINE_REPO}"\n'
+    assert check(tmp_path, "src/sdlc_engine/project_check.py", line) == []
+    assert check(tmp_path, "src/sdlc_engine/project_check.py", f'X = "{HANDLE}"\n') != []
+    assert check(tmp_path, "src/sdlc_engine/other.py", line) != []
+    assert check(tmp_path, "tests/test_x.py", line) != []

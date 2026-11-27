@@ -86,6 +86,14 @@ def test_the_action_secret_is_only_passed_through_with_and_the_token_is_not_in_o
 def test_checkout_does_not_persist_credentials_and_origin_is_reset_after_each_action_step():
     _, st = steps()
     assert st[0]["with"]["persist-credentials"] is False
+    # D-004: the engine and the project config are two more checkouts per load, four loads. None may keep a token in .git/config.
+    checkouts = [s for s in st if str(s.get("uses", "")).startswith("actions/checkout@")]
+    assert len(checkouts) == 1 + 8
+    assert all(c["with"]["persist-credentials"] is False for c in checkouts)
+    assert all(c["with"].get("token") is None for c in checkouts)           # the default token only, never a named secret
+    for s in st:
+        if s["name"].startswith("Trusted engine code"):                      # a load step holds no token, only the two job.workflow_* values
+            assert set(s.get("env") or {}) <= {"WORKFLOW_REPOSITORY", "WORKFLOW_SHA"}, s["name"]
     names = [s["name"] for s in st]
     # ADR-068: the verifier is an agent too; the same rules apply to it (its own reset, then only the keep step)
     for action_name, next_name in (("Run the stage agents", "Check what the agent changed"),

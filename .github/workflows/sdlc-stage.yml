@@ -39,12 +39,63 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Trusted engine code, before decide (1 of 5) clear the folders (ADR-036)
+        run: |
+          # A caller repository may track a folder of the same name. Hide the folders from git status and git add.
+          rm -rf engine project-config
+          mkdir -p .git/info
+          grep -qxF '/engine/' .git/info/exclude 2>/dev/null || echo '/engine/' >> .git/info/exclude
+          grep -qxF '/project-config/' .git/info/exclude 2>/dev/null || echo '/project-config/' >> .git/info/exclude
+      - name: Trusted engine code, before decide (2 of 5) check out the engine, the called workflow's own repository and commit (D-004)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: engine
+          sparse-checkout: src
+          persist-credentials: false
+      - name: Trusted engine code, before decide (3 of 5) verify the engine commit (D-004)
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
+          if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
+            exit 1
+          fi
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
+          if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
+            echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
+            exit 1
+          fi
+          echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Trusted engine code, before decide (4 of 5) check out the project config from the trigger commit (D-004)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: project-config
+          sparse-checkout: .github/sdlc-config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Trusted engine code, before decide (5 of 5) use it (ADR-036, D-004)
+        run: |
+          # Taken before decide and the budget gate, which therefore run the engine's code, never the caller's src.
+          test -f engine/src/sdlc_engine/__init__.py
+          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"
+          echo "SDLC_CONFIG=$GITHUB_WORKSPACE/project-config/.github/sdlc-config.json" >> "$GITHUB_ENV"
+
       - name: Decide what to run
         id: d
         run: |
           mkdir -p .sdlc
           git for-each-ref --format='%(refname:short)' refs/remotes/origin/agent/ | sed 's#^origin/##' > .sdlc/branches.txt
-          PYTHONPATH=src python -m sdlc_engine --config .github/sdlc-config.json decide --event "$GITHUB_EVENT_PATH" --branches .sdlc/branches.txt
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" decide --event "$GITHUB_EVENT_PATH" --branches .sdlc/branches.txt
 
       - name: Budget gate (agent minutes per rolling window, ADR-032)
         if: steps.d.outputs.run == 'true'
@@ -60,7 +111,7 @@ jobs:
           # Unset or non-numeric caps become 60 and 240 inside budget.py; a cap of 0 blocks everything. An
           # unreadable run history also blocks (fail closed). The job stays green either way.
           rc=0
-          PYTHONPATH=src python -m sdlc_engine.budget --config .github/sdlc-config.json --run-id "$RUN_ID" --stage "$STAGE" --max-24h "$MAX_24H" --max-7d "$MAX_7D" \
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine.budget --config "$SDLC_CONFIG" --run-id "$RUN_ID" --stage "$STAGE" --max-24h "$MAX_24H" --max-7d "$MAX_7D" \
             --summary "$GITHUB_STEP_SUMMARY" --comment .sdlc/comment.md || rc=$?
           if [ "$rc" -ne 0 ]; then
             if [ "$rc" -ne 3 ]; then
@@ -87,30 +138,61 @@ jobs:
             echo "stop=true" >> "$GITHUB_ENV"
           fi
 
-      - name: Trusted engine code, before the agent (1 of 3) clear the folder (ADR-036)
+      - name: Trusted engine code, before the agent (1 of 5) clear the folders (ADR-036)
         if: always() && steps.d.outputs.run == 'true'
         run: |
-          # The branch may hold code an agent wrote in an earlier run. Hide the folder from git status and git add.
-          rm -rf trusted
+          # The branch may hold code an agent wrote in an earlier run. Hide the folders from git status and git add.
+          rm -rf engine project-config
           mkdir -p .git/info
-          grep -qxF '/trusted/' .git/info/exclude 2>/dev/null || echo '/trusted/' >> .git/info/exclude
-      - name: Trusted engine code, before the agent (2 of 3) check out the trigger commit (ADR-036)
+          grep -qxF '/engine/' .git/info/exclude 2>/dev/null || echo '/engine/' >> .git/info/exclude
+          grep -qxF '/project-config/' .git/info/exclude 2>/dev/null || echo '/project-config/' >> .git/info/exclude
+      - name: Trusted engine code, before the agent (2 of 5) check out the engine, the called workflow's own repository and commit (D-004)
         if: always() && steps.d.outputs.run == 'true'
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
-          path: trusted
-          sparse-checkout: |
-            src
-            .github
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: engine
+          sparse-checkout: src
           persist-credentials: false
-      - name: Trusted engine code, before the agent (3 of 3) use it (ADR-036)
+      - name: Trusted engine code, before the agent (3 of 5) verify the engine commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
+          if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
+            exit 1
+          fi
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
+          if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
+            echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
+            exit 1
+          fi
+          echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Trusted engine code, before the agent (4 of 5) check out the project config from the trigger commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: project-config
+          sparse-checkout: .github/sdlc-config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Trusted engine code, before the agent (5 of 5) use it (ADR-036, D-004)
         if: always() && steps.d.outputs.run == 'true'
         run: |
           # Taken before the agent runs, so every helper that runs before it (skip, frame, prompt) is trusted code.
-          test -f trusted/src/sdlc_engine/__init__.py
-          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/trusted/src" >> "$GITHUB_ENV"
-
+          test -f engine/src/sdlc_engine/__init__.py
+          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"
+          echo "SDLC_CONFIG=$GITHUB_WORKSPACE/project-config/.github/sdlc-config.json" >> "$GITHUB_ENV"
       - name: Check the stage's input exists (the gate before it)
         if: steps.d.outputs.run == 'true' && steps.d.outputs.needs != '' && env.stop != 'true'
         env:
@@ -130,7 +212,7 @@ jobs:
           # does not run; the post step posts one line and removes only the trigger label. The check is trusted code:
           # it imports the trigger commit's src, never the branch's (the pre-agent trusted load above).
           rm -f .sdlc/comment.md
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" skipped --decision .sdlc/decision.json --comment .sdlc/comment.md
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" skipped --decision .sdlc/decision.json --comment .sdlc/comment.md
           if [ -s .sdlc/comment.md ]; then
             echo "stop=true" >> "$GITHUB_ENV"
             echo "skipped=true" >> "$GITHUB_ENV"
@@ -157,8 +239,8 @@ jobs:
       - name: Frame the issue as untrusted input and write the stage prompt
         if: steps.d.outputs.run == 'true' && env.stop != 'true'
         run: |
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" issue --event "$GITHUB_EVENT_PATH" --comments .sdlc/comments.json --pr-comments .sdlc/pr-comments.json
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" prompt
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" issue --event "$GITHUB_EVENT_PATH" --comments .sdlc/comments.json --pr-comments .sdlc/pr-comments.json
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" prompt
 
       - name: Read the check results of the current commit (for a review or release stage, ADR-037)
         id: checks_current
@@ -226,36 +308,68 @@ jobs:
           git config --local remote.origin.url "https://github.com/${GITHUB_REPOSITORY}.git"
           rm -f .git/config.worktree
           rm -rf .git/hooks && mkdir .git/hooks
-      - name: Trusted engine code (1 of 3) clear the folder (ADR-036)
+      - name: Trusted engine code, after the stage agents (1 of 5) clear the folders (ADR-036)
         if: always() && steps.d.outputs.run == 'true'
         run: |
-          # The folder may hold anything an agent wrote. Hide it from git status and git add.
-          rm -rf trusted
+          # The folders may hold anything an agent wrote. Hide them from git status and git add.
+          rm -rf engine project-config
           mkdir -p .git/info
-          grep -qxF '/trusted/' .git/info/exclude 2>/dev/null || echo '/trusted/' >> .git/info/exclude
-      - name: Trusted engine code (2 of 3) check out the trigger commit (ADR-036)
+          grep -qxF '/engine/' .git/info/exclude 2>/dev/null || echo '/engine/' >> .git/info/exclude
+          grep -qxF '/project-config/' .git/info/exclude 2>/dev/null || echo '/project-config/' >> .git/info/exclude
+      - name: Trusted engine code, after the stage agents (2 of 5) check out the engine, the called workflow's own repository and commit (D-004)
         if: always() && steps.d.outputs.run == 'true'
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
-          path: trusted
-          sparse-checkout: |
-            src
-            .github
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: engine
+          sparse-checkout: src
           persist-credentials: false
-      - name: Trusted engine code (3 of 3) use it (ADR-036)
+      - name: Trusted engine code, after the stage agents (3 of 5) verify the engine commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
+          if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
+            exit 1
+          fi
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
+          if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
+            echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
+            exit 1
+          fi
+          echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Trusted engine code, after the stage agents (4 of 5) check out the project config from the trigger commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: project-config
+          sparse-checkout: .github/sdlc-config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Trusted engine code, after the stage agents (5 of 5) use it (ADR-036, D-004)
         if: always() && steps.d.outputs.run == 'true'
         run: |
           # Taken after each agent run: the review agents may Write anywhere in the workspace too.
-          test -f trusted/src/sdlc_engine/__init__.py
-          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/trusted/src" >> "$GITHUB_ENV"
+          test -f engine/src/sdlc_engine/__init__.py
+          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"
+          echo "SDLC_CONFIG=$GITHUB_WORKSPACE/project-config/.github/sdlc-config.json" >> "$GITHUB_ENV"
       - name: Check what the agent changed
         id: check
         if: steps.d.outputs.run == 'true' && env.stop != 'true'
         run: |
           # ADR-055: whether the stage agent wrote a report, read before the post step adds its fallback text to comment.md.
           if [ -f .sdlc/comment.md ]; then echo "agent_report=true" >> "$GITHUB_ENV"; else echo "agent_report=false" >> "$GITHUB_ENV"; fi
-          if ! PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" check 2> .sdlc/check.txt; then
+          if ! PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" check 2> .sdlc/check.txt; then
             cat .sdlc/check.txt >&2
             echo "Blocked by the safety check. See the run log." > .sdlc/comment.md
             echo "stop=true" >> "$GITHUB_ENV"
@@ -292,7 +406,7 @@ jobs:
             git commit -q -m "[#$NUMBER] sdlc: $STAGE" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
             git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
             if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
-              PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" pr-body --number "$NUMBER" --workdir "$WORKDIR" > .sdlc/pr-body.md
+              PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" pr-body --number "$NUMBER" --workdir "$WORKDIR" > .sdlc/pr-body.md
               gh pr create --draft --base main --head "$BRANCH" --title "[#$NUMBER] $ISSUE_TITLE" --body-file .sdlc/pr-body.md \
                 || echo "The branch was pushed but the PR could not be opened: enable 'Allow GitHub Actions to create and approve pull requests' in Settings, Actions, General." >> .sdlc/comment.md
               # Best effort: copy the issue's type:* labels onto the PR (never agent:* or stage:*); never fails the step.
@@ -358,7 +472,7 @@ jobs:
           # (SDLC_MAX_REVIEW_ROUNDS, default 3). A blocked round runs no review agent; the post step posts one short comment.
           # The values are passed as they are; the engine reads them, and anything it cannot read blocks (fail closed).
           rm -f .sdlc/round-cap.md .sdlc/round-marker.txt
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" rounds \
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" rounds \
             --comments .sdlc/round-comments.json --head "$PUSHED_SHA" --max "$MAX_REVIEW_ROUNDS" --verify "$VERIFY_REVIEW" \
             --round-out .sdlc/round.json --comment-out .sdlc/round-cap.md --marker-out .sdlc/round-marker.txt
       - name: Review the build (reviewer and security reviewer, read only)
@@ -369,10 +483,10 @@ jobs:
           if [ -f .sdlc/comment.md ]; then cp .sdlc/comment.md .sdlc/build-report.md; else echo "The build agent wrote no report." > .sdlc/build-report.md; fi
           # ADR-068: from round 3 the diff is the change since the last reviewed commit, while that commit is an ancestor of
           # HEAD; otherwise the full diff (the summary says so). The reviewers and the drop rule read this one file.
-          DIFF_BASE=$(PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" diff-base --round .sdlc/round.json)
+          DIFF_BASE=$(PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" diff-base --round .sdlc/round.json)
           read -r MODE BASE <<< "$DIFF_BASE"
           if [ "$MODE" = since ]; then git diff "$BASE...HEAD" > .sdlc/diff.patch; else git diff origin/main...HEAD > .sdlc/diff.patch; fi
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" prompt --as review --round .sdlc/round.json --out .sdlc/review-prompt.md
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" prompt --as review --round .sdlc/round.json --out .sdlc/review-prompt.md
       - name: Run the review agents
         id: review
         if: steps.d.outputs.run == 'true' && steps.d.outputs.stage == 'build' && steps.push.outputs.pushed == 'true' && steps.rounds.outputs.blocked != 'true'
@@ -407,29 +521,61 @@ jobs:
           git config --local remote.origin.url "https://github.com/${GITHUB_REPOSITORY}.git"
           rm -f .git/config.worktree
           rm -rf .git/hooks && mkdir .git/hooks
-      - name: Trusted engine code, again after the reviewers (1 of 3) clear the folder (ADR-036)
+      - name: Trusted engine code, again after the reviewers (1 of 5) clear the folders (ADR-036)
         if: always() && steps.d.outputs.run == 'true'
         run: |
-          # The folder may hold anything an agent wrote. Hide it from git status and git add.
-          rm -rf trusted
+          # The folders may hold anything an agent wrote. Hide them from git status and git add.
+          rm -rf engine project-config
           mkdir -p .git/info
-          grep -qxF '/trusted/' .git/info/exclude 2>/dev/null || echo '/trusted/' >> .git/info/exclude
-      - name: Trusted engine code, again after the reviewers (2 of 3) check out the trigger commit (ADR-036)
+          grep -qxF '/engine/' .git/info/exclude 2>/dev/null || echo '/engine/' >> .git/info/exclude
+          grep -qxF '/project-config/' .git/info/exclude 2>/dev/null || echo '/project-config/' >> .git/info/exclude
+      - name: Trusted engine code, again after the reviewers (2 of 5) check out the engine, the called workflow's own repository and commit (D-004)
         if: always() && steps.d.outputs.run == 'true'
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
-          path: trusted
-          sparse-checkout: |
-            src
-            .github
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: engine
+          sparse-checkout: src
           persist-credentials: false
-      - name: Trusted engine code, again after the reviewers (3 of 3) use it (ADR-036)
+      - name: Trusted engine code, again after the reviewers (3 of 5) verify the engine commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        env:
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          # D-004: the engine checkout must be exactly the commit this workflow file was called at. Both values come
+          # through env, never into the script text. On either failure the checkout is removed, so a later step that
+          # ignores this failure still cannot run an unverified engine.
+          if ! printf '%s' "$WORKFLOW_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error title=Engine commit::the called workflow's commit is not a full commit id"
+            rm -rf engine
+            exit 1
+          fi
+          ENGINE_HEAD=$(git -C engine rev-parse HEAD) || { rm -rf engine; exit 1; }
+          if [ "$ENGINE_HEAD" != "$WORKFLOW_SHA" ]; then
+            echo "::error title=Engine commit::the engine checkout is at $ENGINE_HEAD, not at the called workflow's commit $WORKFLOW_SHA"
+            rm -rf engine
+            exit 1
+          fi
+          echo "Engine: $WORKFLOW_REPOSITORY at $ENGINE_HEAD (the called workflow's own repository and commit)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Trusted engine code, again after the reviewers (4 of 5) check out the project config from the trigger commit (D-004)
+        if: always() && steps.d.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: project-config
+          sparse-checkout: .github/sdlc-config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Trusted engine code, again after the reviewers (5 of 5) use it (ADR-036, D-004)
         if: always() && steps.d.outputs.run == 'true'
         run: |
           # Taken after each agent run: the review agents may Write anywhere in the workspace too.
-          test -f trusted/src/sdlc_engine/__init__.py
-          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/trusted/src" >> "$GITHUB_ENV"
+          test -f engine/src/sdlc_engine/__init__.py
+          echo "TRUSTED_SRC=$GITHUB_WORKSPACE/engine/src" >> "$GITHUB_ENV"
+          echo "SDLC_CONFIG=$GITHUB_WORKSPACE/project-config/.github/sdlc-config.json" >> "$GITHUB_ENV"
       - name: Keep the review agents' execution file (ADR-055)
         if: always() && steps.d.outputs.run == 'true'
         env:
@@ -444,7 +590,7 @@ jobs:
         run: |
           # ADR-068: off unless SDLC_REVIEW_VERIFY is exactly true (the engine decides). Trusted code, from the copy the reload
           # above took after the reviewers: the reviewers can write the workspace, so a copy taken before them is not used.
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" verify-prompt --review .sdlc/review.md --diff .sdlc/diff.patch --out .sdlc/verify-prompt.md
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" verify-prompt --review .sdlc/review.md --diff .sdlc/diff.patch --out .sdlc/verify-prompt.md
       - name: Run the verifier agent (optional, ADR-068)
         id: verify
         if: steps.verifyprep.outputs.needed == 'true'
@@ -488,7 +634,7 @@ jobs:
       - name: Reject any change the reviewers made
         id: reject
         if: steps.d.outputs.run == 'true' && steps.d.outputs.stage == 'build' && steps.push.outputs.pushed == 'true'
-        run: PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" check --as review
+        run: PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" check --as review
 
       - name: Post the report, apply the stage label
         if: always() && steps.d.outputs.run == 'true'
@@ -518,7 +664,7 @@ jobs:
           # A blocked run posts one fixed sentence and nothing the agent wrote. The agent's text is scanned once
           # more here, because the reviewers write after the first check.
           if [ "$blocked" != "true" ] && [ "$REJECTED" != "failure" ]; then
-            PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" scan || blocked=true
+            PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" scan || blocked=true
           else
             blocked=true
           fi
@@ -529,10 +675,10 @@ jobs:
             # ADR-068: the verifier's final message is read by trusted code when a verifier ran; without one every kept finding stays.
             VARGS=()
             if [ "$VERIFY_RAN" = "true" ]; then
-              PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" verify-answer --exec .sdlc/exec-verify.json --out .sdlc/verify-answer.md || : > .sdlc/verify-answer.md
+              PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" verify-answer --exec .sdlc/exec-verify.json --out .sdlc/verify-answer.md || : > .sdlc/verify-answer.md
               VARGS=(--verify-answer .sdlc/verify-answer.md)
             fi
-            PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" review \
+            PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" review \
               --stage "$STAGE" --review .sdlc/review.md --diff .sdlc/diff.patch --checks-line "$CHECKS_LINE" \
               --out .sdlc/review.md --next-out .sdlc/review-next.txt --summary-out .sdlc/review-summary.txt "${VARGS[@]}"
             cat .sdlc/review-summary.txt >> "$GITHUB_STEP_SUMMARY"
@@ -543,7 +689,7 @@ jobs:
           ARGS=(--stage .sdlc/exec-stage.json --review .sdlc/exec-review.json --summary-out .sdlc/denial-summary.txt
                 --denials-out .sdlc/denial-comment.md --message-out .sdlc/agent-message.md)
           if [ "$AGENT_REPORT" = "false" ]; then ARGS+=(--no-report); fi
-          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$TRUSTED_SRC/../.github/sdlc-config.json" agent-notes "${ARGS[@]}" \
+          PYTHONPATH="$TRUSTED_SRC" python -P -m sdlc_engine --config "$SDLC_CONFIG" agent-notes "${ARGS[@]}" \
             || echo "Permission denials: unavailable (the execution file could not be read)" > .sdlc/denial-summary.txt
           cat .sdlc/denial-summary.txt >> "$GITHUB_STEP_SUMMARY"
           if [ "$blocked" = "true" ]; then

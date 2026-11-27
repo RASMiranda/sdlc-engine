@@ -11,15 +11,23 @@ then does the workflow commit, push to an `agent/*` branch, open a **draft** pul
 An agent can write any file in its checkout, so any code or config it can influence must not run in a step that holds a
 token. Concretely:
 
-- The engine runs from a **second checkout of the trigger commit**, taken before any agent runs and again after each agent
-  run, with `python -P` so the working directory is not on `sys.path`.
-- The project config (`.github/sdlc-config.json`) is read from that same commit. A config change therefore reaches a run
-  only through a merged pull request. It is a protected path, so an agent cannot write it.
+- The **engine** runs from a checkout of the repository and the commit the called workflow itself comes from
+  (`job.workflow_repository` at `job.workflow_sha`), into `engine/`, with only `src` fetched. It is taken before anything
+  else runs (so `decide` and the budget gate run the engine's code too, never the caller's workspace) and again after each
+  agent run, with `python -P` so the working directory is not on `sys.path`. Every one of those four checkouts is followed by a step that
+  fails the job unless `git -C engine rev-parse HEAD` equals `job.workflow_sha`, and writes that commit to the job summary.
+  Both values reach the step through `env`, never the script text. The workflow has no `engine_sha` input: the only way to
+  choose the engine's version is the consumer's pinned `uses:` line (D-004).
+- The **project config** (`.github/sdlc-config.json`) comes from a sparse checkout of the caller's trigger commit
+  (`github.sha`, which for an issue event is the default branch's commit) into `project-config/`, passed to every engine call
+  as `--config "$SDLC_CONFIG"`. A config change therefore reaches a run only through a merged pull request. It is a protected
+  path, so an agent cannot write it. Nothing reads config from the workspace root or from the agent's branch.
 - A consumer reaches the engine only by a **full 40-hex commit SHA** with the version in a comment. A branch or a floating
   tag can move under a consumer without any review in the consumer's repository; a SHA cannot. A released `v*` tag of this
   repository can never be moved (see D-002).
 - A change to the engine or to the stage workflow made on an agent branch is not used by that branch's own run. That is
-  intended. The engine's package is also a protected path in a consumer's config.
+  intended. In a consumer the engine is not in the workspace at all; the engine's package is also a protected path in a
+  consumer's config.
 
 ## Where the token is, and where it is not
 
@@ -69,6 +77,14 @@ approve and never block by themselves; branch protection, a green check and a co
 - A person with write access can delete the bot's review marker comments, which lowers the round count.
 - Several of the controls above were checked by tests of the workflow's text and by fixtures, not by a real run on a
   consumer. A consumer should watch its first runs.
+- Not verified: that `job.workflow_repository` and `job.workflow_sha` hold the called workflow's own repository and commit
+  inside a real cross-repository call. A spike measured them in a step's `with:` (no `id-token` permission needed); the
+  first canary run in a consumer covers the rest (D-004). If they were wrong, the verify step would fail the job rather than
+  run other code.
+- The folders `engine/` and `project-config/` are the workflow's own, in the caller's workspace. Each load deletes them
+  before it checks them out, so a consumer must keep those two names free. `check-project` fails (rule `reserved`) when
+  either exists in the project root, tracked or not. A failed engine verification also removes `engine/`, so a later step
+  cannot run an unverified checkout.
 
 ## This repository
 
