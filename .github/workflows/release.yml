@@ -1,0 +1,69 @@
+name: release
+# D-005: merging a release PR into main is the release. When a push to main changes CHANGELOG.md, this job reads the top
+# versioned section, and if its tag does not exist yet it creates the annotated tag on the pushed commit and the release.
+# An existing tag is never touched: a fix is a new version. The token is set only on the two steps that push the tag
+# and create the release. Every action is pinned by full commit SHA. tests/test_release_workflow.py pins this file.
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write        # create the tag and the release; nothing else
+    steps:
+      - name: Check out the pushed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Read the version and notes from the changelog
+        id: notes
+        run: |
+          # The engine code of this very commit, not the working directory (-P). Fails red, and tags nothing, when the
+          # changelog, pyproject.toml and the engine disagree or the notes are empty.
+          VERSION=$(PYTHONPATH=src python -P -m sdlc_engine release-notes --changelog CHANGELOG.md --pyproject pyproject.toml --out notes.md)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if the tag already exists
+        id: exists
+        env:
+          VERSION: ${{ steps.notes.outputs.version }}
+        run: |
+          # A failed lookup fails the job: it never tags blind.
+          found=$(git ls-remote --tags origin "refs/tags/v$VERSION")
+          if [ -n "$found" ]; then
+            echo "v$VERSION already released; nothing to do."
+            echo "already released: v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push the annotated tag
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.notes.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git -c user.name="sdlc-engine-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -a "v$VERSION" -m "v$VERSION" "$GITHUB_SHA"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/v$VERSION:refs/tags/v$VERSION"
+
+      - name: Create the release from the tag
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.notes.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file notes.md
+          echo "released: v$VERSION at $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

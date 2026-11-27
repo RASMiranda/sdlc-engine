@@ -61,6 +61,13 @@ pip install pytest PyYAML
 python -m pytest -q
 ```
 
+To cut a release, open one pull request that moves the `[Unreleased]` entries in `CHANGELOG.md` under a new
+`## [X.Y.Z] - YYYY-MM-DD` heading, sets `version` in `pyproject.toml` to `X.Y.Z` (and the version in
+`tests/test_engine_package.py`), and says BREAKING where it applies. Check it locally with
+`PYTHONPATH=src python -P -m sdlc_engine release-notes --changelog CHANGELOG.md --pyproject pyproject.toml --out /tmp/notes.md`.
+Merging it is the release: `.github/workflows/release.yml` creates the annotated tag `vX.Y.Z` on the merge commit and the
+release from that section (D-005). Never push or move a `v*` tag by hand; a fix is a new version.
+
 Tests that need a project's files read `tests/fixture-project/`. `tests/test_guard_engine.py` fails if a tracked file holds
 a project name, a maintainer handle, an email address or a phone number outside its allow-list.
 

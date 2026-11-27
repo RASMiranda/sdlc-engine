@@ -128,3 +128,36 @@ Consequences.
   network: `sparse-checkout-cone-mode: false` with a single file path in `actions/checkout`; the canary covers it. Each is covered
   by the verify step or by a failed `--config` (a missing config file stops the run), so a wrong guess stops a run rather than running other code.
 
+## D-005: A release is cut by merging a release PR; a workflow tags and publishes it (2026-11-27, Bangkok)
+
+Context. D-001 (d) says releases are annotated `vX.Y.Z` tags behind a tag ruleset, cut after a human-merged PR. Cutting
+v0.2.0 showed the gap: the agent session can push its own branch but not a tag (its egress proxy answers 403), so the
+tag and the release were left to a manual step in the GitHub UI, where the target commit is easy to get wrong.
+
+Decision.
+
+1. `.github/workflows/release.yml` runs on `push` to `main` that changes `CHANGELOG.md`, and on nothing else (no
+   `workflow_dispatch`, no `pull_request*`). Workflow `permissions: {}`; one job with `contents: write` only.
+2. It checks out the pushed commit (`persist-credentials: false`) and runs `python -P -m sdlc_engine release-notes` from
+   it. That command reads the top `## [X.Y.Z] - YYYY-MM-DD` section (not `[Unreleased]`), and fails red, tagging nothing,
+   when there is no such section, the version is not SemVer, the date is not real, the version differs from
+   `pyproject.toml` or from `engine_version()`, or the notes are empty.
+3. If `vX.Y.Z` already exists on the remote, the job stops green ("already released"). An existing tag is never moved,
+   re-pointed or deleted; a fix is a new version.
+4. Otherwise it creates the annotated tag `vX.Y.Z` on `$GITHUB_SHA`, pushes only that tag, and runs
+   `gh release create vX.Y.Z --verify-tag --notes-file notes.md`. The token is in those two steps' `env` only. The version
+   and the sha reach the scripts through `env`, never as `${{ }}` in run text. Every action is pinned by full SHA.
+5. Who can cut a release: whoever can get a release PR merged into `main`, which the `protect-main` ruleset limits to a
+   PR with a code owner's approval (D-002). No person and no agent pushes a release tag by hand.
+
+Consequences.
+
+* A release PR moves the `[Unreleased]` entries under a new `## [X.Y.Z] - YYYY-MM-DD` heading and bumps
+  `pyproject.toml` (and the version test) in the same PR. Merging it is the release.
+* Any later PR that edits `CHANGELOG.md` re-runs the job, which finds the tag and stops green.
+* The tag ruleset must let the GitHub Actions app create `v*` tags while update and deletion stay restricted. Its creation
+  rule is unticked today, so this should hold.
+* v0.2.0: no tag exists yet. If this workflow merges before `v0.2.0` is created by hand on `ee3604d`, the workflow tags the
+  merge commit of the workflow PR as `v0.2.0` instead.
+* Not verified (no workflow runs from the session): that job-level `contents: write` is honoured under the repository's
+  read-only default, and that the tag ruleset admits the Actions app's tag creation. The first release run shows both.
